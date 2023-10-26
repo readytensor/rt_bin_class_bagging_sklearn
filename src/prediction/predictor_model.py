@@ -45,6 +45,7 @@ class Classifier:
             n_estimators=self.n_estimators,
             max_samples=self.max_samples,
             bootstrap=self.bootstrap,
+            random_state=0
         )
         return model
 
