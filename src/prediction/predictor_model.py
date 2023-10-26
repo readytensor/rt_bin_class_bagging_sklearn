@@ -117,9 +117,9 @@ class Classifier:
     def __str__(self):
         return (
             f"Model name: {self.model_name} ("
-            f"n_estimators: {self.n_estimators}, "
+            f"bootstrap: {self.bootstrap}, "
             f"max_samples: {self.max_samples}, "
-            f"bootstrap: {self.bootstrap})"
+            f"n_estimators: {self.n_estimators})"
         )
 
 
