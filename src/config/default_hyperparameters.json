@@ -1,5 +1,7 @@
 {
   "n_estimators": 50,
   "max_samples": 1.0,
-  "bootstrap": true
+  "bootstrap": true,
+  "decision_threshold": 0.5,
+  "positive_class_weight": 1.0
 }
