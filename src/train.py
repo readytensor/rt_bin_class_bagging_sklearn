@@ -1,11 +1,7 @@
-import argparse
-
 from config import paths
 from data_models.data_validator import validate_data
-from hyperparameter_tuning.tuner import tune_hyperparameters
 from logger import get_logger, log_error
 from prediction.predictor_model import (
-    evaluate_predictor_model,
     save_predictor_model,
     train_predictor_model,
 )
@@ -16,8 +12,7 @@ from preprocessing.preprocess import (
     transform_data,
 )
 from schema.data_schema import load_json_data_schema, save_schema
-from utils import read_csv_in_directory, read_json_as_dict, set_seeds, split_train_val
-from xai.explainer import fit_and_save_explainer
+from utils import read_csv_in_directory, read_json_as_dict, set_seeds
 
 logger = get_logger(task_name="train")
 
@@ -31,11 +26,6 @@ def run_training(
     preprocessing_dir_path: str = paths.PREPROCESSING_DIR_PATH,
     predictor_dir_path: str = paths.PREDICTOR_DIR_PATH,
     default_hyperparameters_file_path: str = paths.DEFAULT_HYPERPARAMETERS_FILE_PATH,
-    run_tuning: bool = False,
-    hpt_specs_file_path: str = paths.HPT_CONFIG_FILE_PATH,
-    hpt_results_dir_path: str = paths.HPT_OUTPUTS_DIR,
-    explainer_config_file_path: str = paths.EXPLAINER_CONFIG_FILE_PATH,
-    explainer_dir_path: str = paths.EXPLAINER_DIR_PATH,
 ) -> None:
     """
     Run the training process and saves model artifacts
@@ -54,14 +44,6 @@ def run_training(
             predictor model.
         default_hyperparameters_file_path (str, optional): The path of the default
             hyperparameters file.
-        run_tuning (bool, optional): Whether to run hyperparameter tuning.
-            Default is False.
-        hpt_specs_file_path (str, optional): The path of the configuration file for
-            hyperparameter tuning.
-        hpt_results_dir_path (str, optional): Dir path where to save the HPT results.
-        explainer_config_file_path (str, optional): The path of the explainer
-            configuration file.
-        explainer_dir_path (str, optional): Dir path where to save the explainer.
     Returns:
         None
     """
@@ -92,19 +74,13 @@ def run_training(
             data=train_data, data_schema=data_schema, is_train=True
         )
 
-        # split train data into training and validation sets
-        logger.info("Performing train/validation split...")
-        train_split, val_split = split_train_val(
-            validated_data, val_pct=model_config["validation_split"]
-        )
-
         logger.info("Loading preprocessing config...")
         preprocessing_config = read_json_as_dict(preprocessing_config_file_path)
 
         # insert nulls in nullable features if no nulls exist in train data
         logger.info("Inserting nulls in nullable features if not present...")
         train_split_with_nulls = insert_nulls_in_nullable_features(
-            train_split, data_schema, preprocessing_config
+            validated_data, data_schema, preprocessing_config
         )
 
         # fit and transform using pipeline and target encoder, then save them
@@ -115,62 +91,26 @@ def run_training(
         transformed_train_inputs, transformed_train_targets = transform_data(
             pipeline, target_encoder, train_split_with_nulls
         )
-        transformed_val_inputs, transformed_val_targets = transform_data(
-            pipeline, target_encoder, val_split
-        )
 
         logger.info("Saving pipeline and label encoder...")
         save_pipeline_and_target_encoder(
             pipeline, target_encoder, preprocessing_dir_path
         )
 
-        # hyperparameter tuning + training the model
-        if run_tuning:
-            logger.info("Tuning hyperparameters...")
-            tuned_hyperparameters = tune_hyperparameters(
-                train_X=transformed_train_inputs,
-                train_y=transformed_train_targets,
-                valid_X=transformed_val_inputs,
-                valid_y=transformed_val_targets,
-                hpt_results_dir_path=hpt_results_dir_path,
-                is_minimize=False,
-                default_hyperparameters_file_path=default_hyperparameters_file_path,
-                hpt_specs_file_path=hpt_specs_file_path,
-            )
-            logger.info("Training classifier...")
-            predictor = train_predictor_model(
-                transformed_train_inputs,
-                transformed_train_targets,
-                hyperparameters=tuned_hyperparameters,
-            )
-        else:
-            # use default hyperparameters to train model
-            logger.info("Training classifier...")
-            default_hyperparameters = read_json_as_dict(
-                default_hyperparameters_file_path
-            )
-            predictor = train_predictor_model(
-                transformed_train_inputs,
-                transformed_train_targets,
-                default_hyperparameters,
-            )
+        # use default hyperparameters to train model
+        logger.info("Training classifier...")
+        hyperparameters = read_json_as_dict(
+            default_hyperparameters_file_path
+        )
+        predictor = train_predictor_model(
+            transformed_train_inputs,
+            transformed_train_targets,
+            hyperparameters,
+        )
 
         # save predictor model
         logger.info("Saving classifier...")
         save_predictor_model(predictor, predictor_dir_path)
-
-        # calculate and print validation accuracy
-        logger.info("Calculating accuracy on validation data...")
-        val_accuracy = evaluate_predictor_model(
-            predictor, transformed_val_inputs, transformed_val_targets
-        )
-        logger.info(f"Validation data accuracy: {val_accuracy}")
-
-        # fit and save explainer
-        logger.info("Fitting and saving explainer...")
-        _ = fit_and_save_explainer(
-            transformed_train_inputs, explainer_config_file_path, explainer_dir_path
-        )
 
         logger.info("Training completed successfully")
 
@@ -184,22 +124,6 @@ def run_training(
         raise Exception(f"{err_msg} Error: {str(exc)}") from exc
 
 
-def parse_arguments() -> argparse.Namespace:
-    """Parse the command line argument that indicates if user wants to run
-    hyperparameter tuning."""
-    parser = argparse.ArgumentParser(description="Train a binary classification model.")
-    parser.add_argument(
-        "-t",
-        "--tune",
-        action="store_true",
-        help=(
-            "Run hyperparameter tuning before training the model. "
-            + "If not set, use default hyperparameters.",
-        ),
-    )
-    return parser.parse_args()
-
 
 if __name__ == "__main__":
-    args = parse_arguments()
-    run_training(run_tuning=args.tune)
+    run_training()
